@@ -5,17 +5,20 @@ extends Node
 #! import_p Keys,
 #! import_show_global DockManager,
 
-const UFile = preload("uid://bl33psa06nv1e") #! resolve ALibRuntime.Utils.UFile.Methods
-const UName = preload("uid://e2t8o184os5r") #! resolve ALibRuntime.Utils.UName
-const UVersion = preload("uid://b4f7kxqukmbj2") #! resolve ALibRuntime.Utils.UVersion
-const UWindow = preload("uid://q2lbynew21er") #! resolve ALibRuntime.Utils.UWindow
-const UResourceMethods = preload("uid://brjrqxh2smivn") #! resolve ALibRuntime.Utils.UResource.Methods
-const ThemeColor = preload("uid://dsukbd2hmebmw") #! resolve ALibEditor.Utils.UEditorTheme.ThemeColor
+const UFile = preload("uid://bqfy5cvhth0m1") #! resolve UtilR.Files.UFile
+const UVersion = preload("uid://dn156lc18d1vt") #! resolve UtilR.UVersion
+const UWindow = preload("uid://d1yl3cuumcudy") #! resolve UtilR.Nodes.UWindow
+const UResource = preload("uid://xwy6i4dlbtvs") #! resolve UtilR.Resources.UResource
+const UObject = preload("uid://3ris0kamdyic") #! resolve UtilR.Objects.UObject
+const UName = preload("uid://b8sil7xrxxs20") #! resolve UtilR.Strings.UName
+const EditorColors = preload("uid://cpw0fsrs38esk") #! resolve UtilE.Colors
 
+const Docks = preload("uid://ct3weeqse5sf5") #! resolve EditorNodeRef.Refs.Docks
+const BottomPanel = preload("uid://b0bnfv62aocty") #! resolve EditorNodeRef.Refs.BottomPanel
+const MainScreen = preload("uid://raukp4vq6c3v").MainScreen #! resolve EditorNodeRef.Refs.MainScreen
+
+# dock manager
 const DockPopupHandler = preload("res://addons/addon_lib/dock_manager/dock_popup/dock_popup_handler.gd")
-const Docks = preload("res://addons/addon_lib/brohd/alib_editor/utils/src/editor_nodes/docks.gd")
-const BottomPanel = preload("res://addons/addon_lib/brohd/alib_editor/utils/src/editor_nodes/bottom_panel.gd")
-const MainScreen = preload("res://addons/addon_lib/brohd/alib_editor/utils/src/editor_nodes/main_screen.gd")
 const MainScreenHandler = preload("res://addons/addon_lib/dock_manager/class/main_screen_handler.gd")
 const MainScreenHandlerMulti = preload("res://addons/addon_lib/dock_manager/class/main_screen_handler_multi.gd")
 const PanelWindow = preload("res://addons/addon_lib/dock_manager/class/panel_window.gd")
@@ -640,7 +643,7 @@ func get_docked_name():
 	return _name
 
 static func get_scene_or_script(control):
-	return UResourceMethods.get_object_file_path(control)
+	return UObject.get_object_file_path(control)
 
 static func _plugin_has_main_screen(_plugin:EditorPlugin):
 	return _plugin.has_method("_has_main_screen")
@@ -662,7 +665,7 @@ class PanelWrapper extends PanelContainer:
 				panel_sb = get_theme_stylebox("panel").duplicate()
 			else: #elif _version <= 7:
 				panel_sb = EditorInterface.get_editor_theme().get_stylebox("panel", "Panel").duplicate()
-				panel_sb.bg_color = ThemeColor.get_theme_color(ThemeColor.Type.BASE)
+				panel_sb.bg_color = EditorColors.get_theme_color(EditorColors.ThemeColor.BASE)
 			
 			panel_sb.content_margin_left = 4 * EditorInterface.get_editor_scale()
 			panel_sb.content_margin_right = 4 * EditorInterface.get_editor_scale()

@@ -1,8 +1,8 @@
 @tool
 extends Node
 
-const UName = preload("uid://e2t8o184os5r") #! resolve ALibRuntime.Utils.UName
-const MainScreen = preload("res://addons/addon_lib/brohd/alib_editor/utils/src/editor_nodes/main_screen.gd")
+const UName = DockManager.UName
+const MainScreen = DockManager.MainScreen
 
 var editor_plugin:EditorPlugin
 var main_screen_button:Button
@@ -36,7 +36,7 @@ func clean_up():
 			button.queue_free()
 
 
-func _child_entered_tree(c):
+func _child_entered_tree(_c:Node) -> void:
 	_connect_buttons()
 
 func _connect_buttons():
@@ -84,7 +84,7 @@ func _add_main_screen_button(control):
 	EditorInterface.get_editor_main_screen().add_child(control)
 	control.hide()
 	plugin_button.icon = _get_control_icon(control)
-	plugin_button.theme_type_variation = MainScreen.get_button_theme()
+	plugin_button.theme_type_variation = &"MainScreenButton"
 	plugin_button.toggle_mode = true
 	
 	main_bar.add_child(plugin_button)

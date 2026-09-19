@@ -1,7 +1,7 @@
 @tool
 extends Node
 
-const MainScreen = preload("res://addons/addon_lib/brohd/alib_editor/utils/src/editor_nodes/main_screen.gd")
+const MainScreen = DockManager.MainScreen
 
 var editor_plugin:EditorPlugin
 var plugin_control:Control
@@ -32,7 +32,7 @@ func _setup():
 			main_screen_button.hide()
 			break
 
-func _child_entered_tree(c):
+func _child_entered_tree(_c:Node):
 	_connect_buttons()
 
 func clean_up():

@@ -1,8 +1,8 @@
 extends Window
 
-const UWindow = preload("res://addons/addon_lib/brohd/alib_runtime/utils/u_window.gd")
-const ThemeColor = preload("uid://dsukbd2hmebmw") #! resolve ALibEditor.Utils.UEditorTheme.ThemeColor
-const UVersion = preload("uid://b4f7kxqukmbj2") #! resolve ALibRuntime.Utils.UVersion
+const UVersion = preload("uid://dn156lc18d1vt") #! resolve UtilR.UVersion
+const UWindow = preload("uid://d1yl3cuumcudy") #! resolve UtilR.Nodes.UWindow
+const EditorColors = preload("uid://cpw0fsrs38esk") #! resolve UtilE.Colors
 
 func _init(control, empty_panel:=false, window_size:=Vector2i(1200, 800), window_pos=null) -> void:
 	
@@ -34,7 +34,7 @@ func _init(control, empty_panel:=false, window_size:=Vector2i(1200, 800), window
 		panel_sb.content_margin_bottom += 2 * EditorInterface.get_editor_scale()
 	
 	panel_sb.draw_center = true
-	panel_sb.bg_color = ThemeColor.get_theme_color(ThemeColor.Type.BASE)
+	panel_sb.bg_color = EditorColors.get_theme_color(EditorColors.ThemeColor.BASE)
 	panel_sb.set_corner_radius_all(0)
 	panel.add_theme_stylebox_override("panel", panel_sb)
 	
