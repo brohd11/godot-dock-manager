@@ -1,6 +1,6 @@
 [gd_scene load_steps=5 format=3 uid="uid://5na0im11uy1e"]
 
-[ext_resource type="Script" uid="uid://tnqhj27mb62f" path="res://addons/addon_lib/dock_manager/dock_popup/dock_popup.gd" id="1_lgxpx"]
+[ext_resource type="Script" uid="uid://tnqhj27mb62f" path="res://addons/_lib/dock_manager/dock_popup/dock_popup.gd" id="1_lgxpx"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_44s5o"]
 bg_color = Color(0, 0, 0, 0.282353)

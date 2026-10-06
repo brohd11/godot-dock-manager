@@ -18,10 +18,10 @@ const BottomPanel = preload("uid://b0bnfv62aocty") #! resolve EditorNodeRef.Refs
 const MainScreen = preload("uid://raukp4vq6c3v").MainScreen #! resolve EditorNodeRef.Refs.MainScreen
 
 # dock manager
-const DockPopupHandler = preload("res://addons/addon_lib/dock_manager/dock_popup/dock_popup_handler.gd")
-const MainScreenHandler = preload("res://addons/addon_lib/dock_manager/class/main_screen_handler.gd")
-const MainScreenHandlerMulti = preload("res://addons/addon_lib/dock_manager/class/main_screen_handler_multi.gd")
-const PanelWindow = preload("res://addons/addon_lib/dock_manager/class/panel_window.gd")
+const DockPopupHandler = preload("res://addons/_lib/dock_manager/dock_popup/dock_popup_handler.gd")
+const MainScreenHandler = preload("res://addons/_lib/dock_manager/class/main_screen_handler.gd")
+const MainScreenHandlerMulti = preload("res://addons/_lib/dock_manager/class/main_screen_handler_multi.gd")
+const PanelWindow = preload("res://addons/_lib/dock_manager/class/panel_window.gd")
 
 const WORKING_FILE_DIR = "user://addons/dock_manager"
 
