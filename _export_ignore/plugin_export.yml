@@ -2,10 +2,7 @@ export_root: "res://addons/_lib/dock_manager/_export_ignore/exports"
 plugin_folder: "DockManager{{version=dock_manager}}"
 pre_script: ""
 post_script: ""
-build_require:
-  - "brohd11/godot-editor-node-ref@v0.4.0"
-  - "brohd11/godot-util-e@v0.1.0"
-  - "brohd11/godot-util-r@v0.2.0"
+build_require: @require
 compile_require: []
 options:
   overwrite: true
