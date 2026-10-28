@@ -27,6 +27,7 @@ const WORKING_FILE_DIR = "user://addons/dock_manager"
 
 const SET_DOCK_DATA = "set_dock_data"
 const GET_DOCK_DATA = "get_dock_data"
+const GET_DOCK_NAME = "get_dock_name"
 
 var _engine_minor_version:int
 
@@ -636,6 +637,9 @@ func _show_in_tab_container():
 func get_docked_name():
 	if _docked_name != "":
 		return _docked_name
+	# Lets several docks from one plugin get their own titles, including restored freeable ones.
+	if plugin_control.has_method(GET_DOCK_NAME):
+		return plugin_control.call(GET_DOCK_NAME)
 	if not external_main_screen_flag:
 		if plugin.has_method("_get_plugin_name"):
 			return plugin._get_plugin_name()
