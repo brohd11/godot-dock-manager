@@ -7,18 +7,16 @@ extends Node
 
 const UFile = preload("uid://bqfy5cvhth0m1") #! resolve UtilR.Files.UFile
 const UVersion = preload("uid://dn156lc18d1vt") #! resolve UtilR.UVersion
-const UWindow = preload("uid://d1yl3cuumcudy") #! resolve UtilR.Nodes.UWindow
 const UResource = preload("uid://xwy6i4dlbtvs") #! resolve UtilR.Resources.UResource
 const UObject = preload("uid://3ris0kamdyic") #! resolve UtilR.Objects.UObject
 const UName = preload("uid://b8sil7xrxxs20") #! resolve UtilR.Strings.UName
-const EditorColors = preload("uid://cpw0fsrs38esk") #! resolve UtilE.Colors
 
-const Docks = preload("uid://ct3weeqse5sf5") #! resolve EditorNodeRef.Refs.Docks
-const BottomPanel = preload("uid://b0bnfv62aocty") #! resolve EditorNodeRef.Refs.BottomPanel
 const MainScreen = preload("uid://raukp4vq6c3v").MainScreen #! resolve EditorNodeRef.Refs.MainScreen
 
 # dock manager
-const DockPopupHandler = preload("res://addons/_lib/dock_manager/src/dock_popup/dock_popup_handler.gd")
+const DockPopup = preload("res://addons/_lib/dock_manager/src/dock_popup/dock_popup.gd")
+const EngineBackend = preload("res://addons/_lib/dock_manager/src/backend/engine_backend.gd")
+const LegacyBackend = preload("res://addons/_lib/dock_manager/src/backend/legacy_backend.gd")
 const MainScreenHandler = preload("res://addons/_lib/dock_manager/src/class/main_screen_handler.gd")
 const MainScreenHandlerMulti = preload("res://addons/_lib/dock_manager/src/class/main_screen_handler_multi.gd")
 const PanelWindow = preload("res://addons/_lib/dock_manager/src/class/panel_window.gd")
@@ -29,22 +27,26 @@ const SET_DOCK_DATA = "set_dock_data"
 const GET_DOCK_DATA = "get_dock_data"
 const GET_DOCK_NAME = "get_dock_name"
 
-var _engine_minor_version:int
+# Engine DockSlot values. EditorDock lacks some of these before 4.8, which would be a parse error.
+const DOCK_SLOT_NONE = -1
+const DOCK_SLOT_BOTTOM = 8
+const DOCK_SLOT_BOTTOM_L = 9
+const DOCK_SLOT_BOTTOM_R = 10
+const DOCK_SLOT_MAIN_SCREEN = 11
 
-var main_screen_handler
+const POPUP_ID_BASE = 7000 # keeps our ids clear of the host menu's own
+
 var external_main_screen_flag := false
 
-var dock_tab_style:= 0
+var _backend
 
 # init args
 var plugin:EditorPlugin
 var plugin_control:Control
 var dock_button:Button
 var default_dock:int
-var last_dock:int
 var can_be_freed:bool = false
 
-var plugin_has_main:bool = false
 var window_title:String = ""
 var empty_panel:bool = false
 var _default_window_size:= Vector2i(1200,800)
@@ -52,13 +54,8 @@ var save_layout:bool = true
 var allow_scene_reload:bool = false
 var _docked_name:String = ""
 
-#4.6
-var editor_dock
-
 # persistent
 var window_always_on_top:bool = true
-var _last_window_size = null
-var _last_window_pos = null
 
 
 var dock_id:= -1
@@ -66,38 +63,40 @@ var dock_id_key:
 	get:
 		return str(dock_id)
 
-enum Slot{
-	FLOATING,
-	BOTTOM_PANEL,
-	MAIN_SCREEN,
-	DOCK_SLOT_LEFT_UL,
-	DOCK_SLOT_LEFT_BL,
-	DOCK_SLOT_LEFT_UR,
-	DOCK_SLOT_LEFT_BR,
-	DOCK_SLOT_RIGHT_UL,
-	DOCK_SLOT_RIGHT_BL,
-	DOCK_SLOT_RIGHT_UR,
-	DOCK_SLOT_RIGHT_BR,
-}
-const _slot = {
-	Slot.FLOATING: -3,
-	Slot.BOTTOM_PANEL: -2,
-	Slot.MAIN_SCREEN: -1,
-	Slot.DOCK_SLOT_LEFT_UL: EditorPlugin.DockSlot.DOCK_SLOT_LEFT_UL,
-	Slot.DOCK_SLOT_LEFT_BL: EditorPlugin.DockSlot.DOCK_SLOT_LEFT_BL,
-	Slot.DOCK_SLOT_LEFT_UR: EditorPlugin.DockSlot.DOCK_SLOT_LEFT_UR,
-	Slot.DOCK_SLOT_LEFT_BR: EditorPlugin.DockSlot.DOCK_SLOT_LEFT_BR,
-	Slot.DOCK_SLOT_RIGHT_UL: EditorPlugin.DockSlot.DOCK_SLOT_RIGHT_UL,
-	Slot.DOCK_SLOT_RIGHT_BL: EditorPlugin.DockSlot.DOCK_SLOT_RIGHT_BL,
-	Slot.DOCK_SLOT_RIGHT_UR: EditorPlugin.DockSlot.DOCK_SLOT_RIGHT_UR,
-	Slot.DOCK_SLOT_RIGHT_BR: EditorPlugin.DockSlot.DOCK_SLOT_RIGHT_BR,
-}
-
 signal dock_changed(dock_manager)
 signal free_requested(dock_manager)
 
 
+## 4.8 made every dock location a slot of the engine's own dock system.
+static func uses_engine_docks() -> bool:
+	return UVersion.get_minor_version() >= 8
+
+## Converts the old location codes: -3 floating, -2 bottom panel, -1 main screen, 0+ dock slots.
+static func legacy_to_slot(code:int) -> int:
+	match code:
+		-3: return DOCK_SLOT_NONE
+		-2: return DOCK_SLOT_BOTTOM
+		-1: return DOCK_SLOT_MAIN_SCREEN
+	return code
+
+static func slot_to_legacy(slot:int) -> int:
+	match slot:
+		DOCK_SLOT_NONE: return -3
+		DOCK_SLOT_BOTTOM: return -2
+		DOCK_SLOT_MAIN_SCREEN: return -1
+	return slot
+
+## Null when nothing is saved. Layouts from before 0.7 hold offset old codes in CURRENT_DOCK.
+static func _read_saved_slot(dock_layout_data:Dictionary):
+	if dock_layout_data.has(Keys.SLOT):
+		return int(dock_layout_data.get(Keys.SLOT))
+	if dock_layout_data.has(Keys.CURRENT_DOCK):
+		return legacy_to_slot(int(dock_layout_data.get(Keys.CURRENT_DOCK)) - 3)
+	return null
+
 static func hide_main_screen_button(_plugin):
+	if uses_engine_docks():
+		return
 	MainScreenHandler.hide_main_screen_button(_plugin)
 
 static func get_plugin_layout_data(_plugin:EditorPlugin):
@@ -133,10 +132,8 @@ static func get_layout_file_dir(_plugin:EditorPlugin):
 	return WORKING_FILE_DIR.path_join(dir_name)
 
 
-func _init(_plugin:EditorPlugin, _control, _dock:Slot=Slot.BOTTOM_PANEL, 
+func _init(_plugin:EditorPlugin, _control, _dock:int=DOCK_SLOT_BOTTOM, 
 	_main_screen_handler=null, _add_to_tree:=true) -> void:
-	_engine_minor_version = UVersion.get_minor_version()
-	
 	plugin = _plugin
 	plugin.add_child(self)
 	if _control is Control:
@@ -144,26 +141,18 @@ func _init(_plugin:EditorPlugin, _control, _dock:Slot=Slot.BOTTOM_PANEL,
 	elif _control is PackedScene:
 		plugin_control = _control.instantiate()
 	
-	
-	if _plugin_has_main_screen(plugin):
-		plugin_has_main = plugin._has_main_screen()
-	else:
-		plugin_has_main = false
-	
-	default_dock = _slot.get(_dock)
-	if default_dock == -1 and not plugin_has_main:
-		default_dock = -2 # if cant handle main, set to bottom panel
-	last_dock = default_dock
-	
 	if _main_screen_handler != null:
-		main_screen_handler = _main_screen_handler
 		external_main_screen_flag = true
+	
+	if uses_engine_docks():
+		_backend = EngineBackend.new(self)
+	else:
+		_backend = LegacyBackend.new(self, _main_screen_handler)
+	
+	default_dock = _backend.normalize_slot(_dock, DOCK_SLOT_BOTTOM)
 	
 	_docked_name = get_docked_name()
 	plugin_control.name = get_docked_name()
-	
-	_set_editor_settings()
-	EditorInterface.get_editor_settings().settings_changed.connect(_set_editor_settings)
 	
 	if _add_to_tree:
 		post_init()
@@ -172,15 +161,9 @@ func add_to_tree():
 	await post_init()
 
 func post_init():
-	if plugin_has_main:
-		if not is_instance_valid(main_screen_handler):
-			main_screen_handler = MainScreenHandler.new(plugin, plugin_control)
-			plugin.add_child(main_screen_handler)
-	if is_instance_valid(main_screen_handler) and not plugin_has_main:
-		printerr("Dock Manager has MainScreenHandler, but plugin doesn't handle main screen.")
+	_backend.prepare()
 	
-	var dock_target
-	var dock_index = -1
+	var dock_target = null
 	var dock_layout_data
 	var dock_data
 	if save_layout:
@@ -188,32 +171,35 @@ func post_init():
 		if dock_id == -1:
 			var meta = layout_data.get(Keys.META)
 			dock_id = meta.get(Keys.NEXT_ID)
+			# Reserved now: the editor layout key comes from the id, so docks added in the same frame can't share one.
+			var docks = layout_data.get(Keys.DOCKS)
+			docks[dock_id_key] = {}
+			meta[Keys.NEXT_ID] = _get_next_dock_id(docks)
 			save_plugin_layout_data(plugin, layout_data)
 			save_layout_data.call_deferred()
 		else:
 			var docks = layout_data.get(Keys.DOCKS)
 			dock_layout_data = docks.get(dock_id_key)
-			dock_target = dock_layout_data.get(Keys.CURRENT_DOCK)
-			dock_index = dock_layout_data.get(Keys.CURRENT_DOCK_INDEX, -1)
+			dock_target = _read_saved_slot(dock_layout_data)
 			dock_data = dock_layout_data.get(Keys.DOCK_DATA, {})
 	
-	if dock_target != null:
-		dock_target -= 3 #^ to offset saved enum back to working val
-	else:
+	if dock_target == null:
 		dock_target = default_dock
 	
-	if dock_target > -3:
-		if dock_target == -1: # main screen
-			await dock_instance(int(dock_target))
-		else:
-			# just place in default, engine will take care of it
-			await dock_instance(int(default_dock))
+	if dock_layout_data != null:
+		window_always_on_top = dock_layout_data.get(Keys.ALWAYS_ON_TOP, true)
+	
+	if dock_target != DOCK_SLOT_NONE:
+		await dock_instance(_backend.get_startup_slot(dock_target))
 	else:
 		if dock_layout_data != null:
-			_set_window_settings(dock_layout_data)
+			_backend.load_window_settings(dock_layout_data)
 		await undock_instance()
-		
 	
+	_finish_control_setup(dock_data)
+
+## Shared with reload, which keeps the dock and replaces only the control.
+func _finish_control_setup(dock_data):
 	if save_layout:
 		if plugin_control.has_method(SET_DOCK_DATA) and dock_data != null:
 			plugin_control.call(SET_DOCK_DATA, dock_data)
@@ -221,48 +207,26 @@ func post_init():
 	if window_title == "":
 		window_title = get_docked_name()
 	
-	if "dock_button" in plugin_control:
+	if "dock_button" in plugin_control and plugin_control.dock_button is Button:
 		dock_button = plugin_control.dock_button
 		dock_button.icon = EditorInterface.get_base_control().get_theme_icon("MakeFloating", &"EditorIcons")
-		dock_button.pressed.connect(_on_dock_button_pressed)
+		dock_button.pressed.connect(show_popup)
 		dock_button.show()
-	else:
-		print("Need dock button in scene to use Dock Manager.")
-		plugin_control.queue_free()
-		return
 	
 	if "dock_manager" in plugin_control:
 		plugin_control.dock_manager = self
 	
-	_set_dock_tab_style.call_deferred() # need this even more delayed?
+	_backend.finish_setup()
 
-func _set_window_settings(dock_layout_data:Dictionary):
-	window_always_on_top = dock_layout_data.get(Keys.ALWAYS_ON_TOP, true)
-	
-	var window_size = dock_layout_data.get(Keys.WINDOW_SIZE)
-	if window_size != null:
-		window_size = str_to_var(window_size)
-		_last_window_size = window_size
-	
-	var current_screen = dock_layout_data.get(Keys.CURRENT_SCREEN, 0)
-	if DisplayServer.get_screen_count() <= current_screen:
-		return
-	
-	var window_pos = dock_layout_data.get(Keys.WINDOW_POSITION)
-	if window_pos != null:
-		window_pos = str_to_var(window_pos)
-		_last_window_pos = window_pos
-
-
-func _set_editor_settings():
-	var ed_settings = EditorInterface.get_editor_settings()
-	dock_tab_style = ed_settings.get_setting(EditorSet.DOCK_TAB_STYLE)
-	
-	await plugin.get_tree().create_timer(3).timeout
-	_set_dock_tab_style()
+func _read_saved_dock_data():
+	var docks = get_plugin_layout_data(plugin).get(Keys.DOCKS)
+	return docks.get(dock_id_key, {}).get(Keys.DOCK_DATA)
 
 func set_default_window_size(size:Vector2i):
 	_default_window_size = size
+
+func get_default_window_size() -> Vector2i:
+	return _default_window_size
 
 func set_window_title(title:String):
 	window_title = title
@@ -272,24 +236,13 @@ func get_plugin_control():
 	return plugin_control
 
 func show_in_editor():
-	var current_dock = _get_current_dock()
-	if _engine_minor_version < 6:
-		if current_dock > -1:
-			_show_in_tab_container()
-		elif current_dock == -2:
-			BottomPanel.show_panel(_docked_name)
-	else: #elif _engine_minor_version <= 7: # Deal with when there is an issue in new version
-		if current_dock > -1 or current_dock == -2:
-			_show_in_tab_container()
+	_backend.show()
 
 
 func clean_up():
 	save_layout_data()
 	await _remove_control_from_parent()
-	
-	if not external_main_screen_flag and plugin_has_main:
-		main_screen_handler.clean_up()
-		main_screen_handler.queue_free()
+	_backend.clean_up()
 	
 	plugin_control.queue_free()
 	queue_free()
@@ -300,11 +253,7 @@ func reload_control():
 	var is_scene = plugin_control.scene_file_path != ""
 	var control_path = get_scene_or_script(plugin_control)
 	
-	await _remove_control_from_parent()
-	plugin_control.queue_free()
-	if main_screen_handler is MainScreenHandler:
-		main_screen_handler.queue_free()
-		main_screen_handler = null
+	await _backend.release_for_reload()
 	
 	if is_scene:
 		var packed:PackedScene = load(control_path)
@@ -312,11 +261,11 @@ func reload_control():
 	else:
 		var script = load(control_path)
 		plugin_control = script.new()
+	plugin_control.name = _docked_name
 	
 	await plugin.get_tree().process_frame
 	
-	add_to_tree()
-	show_in_editor()
+	_backend.finish_reload()
 
 func free_instance():
 	clean_up()
@@ -342,8 +291,7 @@ func save_layout_data():
 		return
 	if not is_instance_valid(plugin_control):
 		return
-	var current_dock = _get_current_dock()
-	var adjusted_dock_val = current_dock + 3 #^ offset to get the enum val
+	var slot = get_current_slot()
 	
 	var layout_data = get_plugin_layout_data(plugin)
 	var docks = layout_data.get(Keys.DOCKS)
@@ -351,18 +299,11 @@ func save_layout_data():
 	var file_path = get_scene_or_script(plugin_control)
 	scene_data[Keys.SCENE_PATH] = file_path
 	scene_data[Keys.SCENE_UID] = UFile.path_to_uid(file_path)
-	scene_data[Keys.CURRENT_DOCK] = adjusted_dock_val
+	if slot != null:
+		scene_data[Keys.SLOT] = slot
+	scene_data.erase(Keys.CURRENT_DOCK)
 	scene_data[Keys.ALWAYS_ON_TOP] = window_always_on_top
-	var window = get_dock_manager_window()# as Window
-	if is_instance_valid(window):
-		scene_data[Keys.CURRENT_SCREEN] = window.current_screen
-		scene_data[Keys.WINDOW_SIZE] = var_to_str(window.size)
-		scene_data[Keys.WINDOW_POSITION] = var_to_str(UWindow.get_window_global_position(window, false))
-	
-	
-	var tab_idx = _get_tab_index()
-	if tab_idx != null:
-		scene_data[Keys.CURRENT_DOCK_INDEX] = tab_idx
+	_backend.save_window_data(scene_data)
 	
 	if can_be_freed:
 		scene_data[Keys.TYPE] = Keys.FREEABLE
@@ -383,123 +324,85 @@ func save_layout_data():
 	save_plugin_layout_data(plugin, layout_data)
 
 
-func _on_dock_button_pressed():
-	var dock_popup_handler = DockPopupHandler.new(plugin_control)
-	if can_be_freed:
-		dock_popup_handler.can_be_freed()
-	if not plugin_has_main:
-		dock_popup_handler.disable_main_screen()
-	if allow_scene_reload:
-		dock_popup_handler.allow_reload()
-	var plugin_window = get_dock_manager_window()
-	if is_instance_valid(plugin_window):
-		dock_popup_handler.show_always_on_top(window_always_on_top)
-	if plugin_control.has_method(&"get_custom_dock_popup_buttons"):
-		var buttons = plugin_control.get_custom_dock_popup_buttons()
-		for b in buttons:
-			dock_popup_handler.add_custom_button(b)
-	
-	var handled = await dock_popup_handler.handled
-	if handled is String:
-		return
-	if handled is Callable:
-		handled.call()
-		return
-	
-	var current_dock
-	if plugin_control.get_parent() is PanelWrapper:
-		current_dock = _slot.get(Slot.MAIN_SCREEN)
-	else:
-		current_dock = Docks.get_current_dock(plugin_control)
-	if current_dock == handled:
-		return
-	
-	if handled == 20:
-		free_requested.emit(self)
-		free_instance.call_deferred()
-	elif handled == 30:
-		reload_control()
-		return
-	elif handled == 40:
-		window_always_on_top = not window_always_on_top
-		plugin_window.always_on_top = window_always_on_top
-	elif handled == _slot.get(Slot.FLOATING):
-		await undock_instance()
-	else:
-		await dock_instance(handled)
-	
-	save_layout_data()
+## Opens the slot grid and actions at the mouse. Connected to dock_button when the control has one.
+func show_popup():
+	var popup = DockPopup.new()
+	popup.slot_chosen.connect(_on_popup_slot_chosen)
+	popup.open(plugin_control, get_current_slot(), _backend.get_available_slots(), get_popup_actions())
 
-func dock_instance(target_dock:int):
-	if target_dock == -3:
-		if default_dock > -3:
-			target_dock = default_dock
-		else:
-			target_dock = -2
-	if target_dock == -1 and not plugin_has_main:
-		target_dock = default_dock
+## Everything the popup offers besides moving, for hosts with their own menu: text, icon, callable,
+## and an optional active flag. Icons are editor theme names or textures.
+func get_popup_actions() -> Array:
+	var actions = []
 	var window = get_dock_manager_window()
 	if is_instance_valid(window):
-		_last_window_size = window.size
-		_last_window_pos = window.position
-	
-	await _remove_control_from_parent()
-	if _engine_minor_version < 6:
-		if target_dock > -1:
-			plugin.add_control_to_dock(target_dock, plugin_control)
-			_set_dock_tab_style()
-		elif target_dock == -1:
-			var panel_wrapper = PanelWrapper.new(plugin_control, empty_panel)
-			panel_wrapper.name = get_docked_name()
-			main_screen_handler.add_main_screen_control(panel_wrapper)
-		elif target_dock == -2:
-			plugin.add_control_to_bottom_panel(plugin_control, get_docked_name())
-	
-	else: #elif _engine_minor_version <= 7: # Deal with when there is an issue in new version
-		if target_dock > -1 or target_dock == -2:
-			if not is_instance_valid(editor_dock):
-				editor_dock = ClassDB.instantiate("EditorDock")
-				editor_dock.title = get_docked_name()
-				editor_dock.dock_icon = _get_plugin_icon()
-				editor_dock.available_layouts = editor_dock.DOCK_LAYOUT_ALL
-			var dock_slot = target_dock
-			if target_dock == -2:
-				dock_slot = 8 # EditorDock.DockSlot.DOCK_SLOT_BOTTOM
-			editor_dock.default_slot = dock_slot
-			if plugin_control.get_parent() == null:
-				editor_dock.add_child(plugin_control)
-			else:
-				plugin_control.reparent(editor_dock)
-			plugin.add_dock(editor_dock)
-			
-		elif target_dock == -1:
-			var panel_wrapper = PanelWrapper.new(plugin_control, empty_panel)
-			panel_wrapper.name = get_docked_name()
-			main_screen_handler.add_main_screen_control(panel_wrapper)
-	
+		actions.append({"text":"Always on Top", "icon":"Pin", "callable":_toggle_always_on_top, "active":window.always_on_top})
+	elif _backend.can_float():
+		actions.append({"text":"Make Floating", "icon":"MakeFloating", "callable":_make_floating})
+	if can_be_freed:
+		actions.append({"text":"Free Instance", "icon":"Clear", "callable":_free_from_popup})
+	if allow_scene_reload:
+		actions.append({"text":"Reload", "icon":"Reload", "callable":reload_control})
+	if plugin_control.has_method(&"get_custom_dock_popup_buttons"):
+		actions.append_array(plugin_control.get_custom_dock_popup_buttons())
+	return actions
+
+## Appends the popup actions to a host menu. Item ids start at POPUP_ID_BASE.
+func add_popup_items(popup:PopupMenu):
+	for action in get_popup_actions():
+		var id = POPUP_ID_BASE + popup.item_count
+		var icon = action.get("icon")
+		if icon is String:
+			icon = EditorInterface.get_editor_theme().get_icon(icon, "EditorIcons")
+		popup.add_icon_item(icon, action.get("text", ""), id)
+		popup.set_item_metadata(popup.get_item_index(id), action.get("callable"))
+	if not popup.id_pressed.is_connected(_on_popup_item_pressed):
+		popup.id_pressed.connect(_on_popup_item_pressed.bind(popup))
+
+## The popup actions in their own menu, for PopupMenu.add_submenu_node_item.
+func get_submenu() -> PopupMenu:
+	var submenu = PopupMenu.new()
+	add_popup_items(submenu)
+	return submenu
+
+func _on_popup_item_pressed(id:int, popup:PopupMenu):
+	if id < POPUP_ID_BASE:
+		return
+	var callable = popup.get_item_metadata(popup.get_item_index(id))
+	if callable is Callable:
+		callable.call()
+
+func _on_popup_slot_chosen(slot:int):
+	await dock_instance(slot)
+	show_in_editor()
+	save_layout_data()
+
+func _make_floating():
+	await undock_instance()
+	save_layout_data()
+
+func _free_from_popup():
+	free_requested.emit(self)
+	free_instance.call_deferred()
+
+## Follows the window, which can differ from the setting when the engine opened it.
+func _toggle_always_on_top():
+	var window = get_dock_manager_window()
+	if not is_instance_valid(window):
+		return
+	window_always_on_top = not window.always_on_top
+	window.always_on_top = window_always_on_top
+	save_layout_data()
+
+## DOCK_SLOT_NONE docks back to the default location, undock_instance is what floats.
+func dock_instance(target_dock:int):
+	if target_dock == DOCK_SLOT_NONE:
+		target_dock = default_dock if default_dock != DOCK_SLOT_NONE else DOCK_SLOT_BOTTOM
+	await _backend.place(_backend.normalize_slot(target_dock, default_dock))
 	dock_changed.emit(self)
 
-
 func undock_instance():
-	await _remove_control_from_parent()
-	var window_size = _default_window_size
-	if _last_window_size is Vector2i:
-		window_size = _last_window_size
-	window_size = Vector2i(50,50).max(window_size)
-	
-	var window_pos = null
-	if _last_window_pos is Vector2i:
-		window_pos = _last_window_pos
-	var window = PanelWindow.new(plugin_control, empty_panel, window_size, window_pos)
-	
-	window.title = window_title
-	if window_title == "":
-		window.title = get_docked_name()
-	window.always_on_top = window_always_on_top
-	window.close_requested.connect(window_close_requested)
-	window.mouse_entered.connect(_on_window_mouse_entered.bind(window))
-	#window.mouse_exited.connect(_on_window_mouse_exited)
-	
+	var window = await _backend.make_floating()
 	dock_changed.emit(self)
 	return window
 
@@ -507,69 +410,23 @@ func remove_control_from_parent():
 	_remove_control_from_parent()
 
 func _remove_control_from_parent():
-	var window = get_dock_manager_window()
-	var current_dock = _get_current_dock()
-	if current_dock != null:
-		last_dock = current_dock
-	
-	var control_parent = plugin_control.get_parent()
-	if is_instance_valid(control_parent):
-		if _engine_minor_version < 6:
-			if current_dock > -1:
-				plugin.remove_control_from_docks(plugin_control)
-			elif current_dock == -1:
-				var panel_wrapper = plugin_control.get_parent()
-				main_screen_handler.remove_main_screen_control(panel_wrapper)
-				panel_wrapper.remove_child(plugin_control)
-				panel_wrapper.queue_free()
-			elif current_dock == -2:
-				plugin.remove_control_from_bottom_panel(plugin_control)
-				BottomPanel.show_first_panel()
-			else:
-				control_parent.remove_child(plugin_control)
-		else: #elif _engine_minor_version <= 7: # Deal with when there is an issue in new version
-			if control_parent == editor_dock:
-				plugin.remove_dock(editor_dock)
-				editor_dock.remove_child(plugin_control)
-				editor_dock.queue_free()
-				editor_dock = null
-			elif current_dock == -1:
-				var panel_wrapper = plugin_control.get_parent()
-				main_screen_handler.remove_main_screen_control(panel_wrapper)
-				panel_wrapper.remove_child(plugin_control)
-				panel_wrapper.queue_free()
-			else:
-				control_parent.remove_child(plugin_control)
-	
-	if is_instance_valid(window):
-		window.queue_free()
+	await _backend.remove_control()
 
-func _get_current_dock():
-	if plugin_control.get_parent() is PanelWrapper:
-		return _slot.get(Slot.MAIN_SCREEN)
-	else:
-		return Docks.get_current_dock(plugin_control)
+## Engine DockSlot value, DOCK_SLOT_NONE when floating. Null if the location can't be determined.
+func get_current_slot():
+	return _backend.get_current_slot()
+
+func is_floating() -> bool:
+	return _backend.is_floating()
 
 func get_current_dock_control():
-	return Docks.get_current_dock_control(plugin_control)
+	return _backend.get_dock_control()
 
 func get_dock_manager_window():
-	var window = plugin_control.get_window()
-	if window is PanelWindow:
-		return window
-	return null
-
-func window_close_requested() -> void:
-	dock_instance(last_dock)
-func _on_window_mouse_entered(window:Window):
-	return
-	if plugin.get_window().gui_is_dragging():
-		window.grab_focus()
-func _on_window_mouse_exited():
-	EditorInterface.get_base_control().get_window().grab_focus()
+	return _backend.get_floating_window()
 
 func on_plugin_make_visible(visible:bool):
-	main_screen_handler.on_plugin_make_visible(visible)
+	_backend.on_plugin_make_visible(visible)
 
 static func clean_dock_manager_array(instances:Array):
 	InstanceManager._clean_dock_manager_array(instances)
@@ -584,55 +441,6 @@ func _get_plugin_icon():
 	elif "plugin_icon" in plugin_control:
 		return plugin_control.get("plugin_icon")
 	return null
-
-func _set_dock_tab_style():
-	if _engine_minor_version >= 6:
-		return
-	var dock = get_current_dock_control()
-	if dock is not TabContainer:
-		return
-	var idx = _get_tab_index()
-	var plugin_name = get_docked_name()
-	var icon = _get_plugin_icon()
-	if dock_tab_style == 0 or icon == null: #^ text
-		dock.set_tab_title(idx, plugin_name)
-		dock.set_tab_icon(idx, null)
-	elif dock_tab_style == 1: #^ icon
-		dock.set_tab_title(idx, "")
-		dock.set_tab_icon(idx, icon)
-	elif dock_tab_style == 2: #^ text and icon
-		dock.set_tab_title(idx, plugin_name)
-		dock.set_tab_icon(idx, icon)
-
-func _get_tab_index():
-	var dock  = get_current_dock_control()
-	if dock is not TabContainer:
-		return
-	if _engine_minor_version < 6:
-		return dock.get_tab_idx_from_control(plugin_control)
-	else: #elif _engine_minor_version <= 7: # Deal with when there is an issue in new version
-		return dock.get_tab_idx_from_control(editor_dock)
-
-func _set_tab_index(idx:int):
-	var dock_control = get_current_dock_control()
-	if dock_control is not TabContainer:
-		return
-	var control_to_move = plugin_control
-	if _engine_minor_version >= 6:
-		control_to_move = editor_dock
-	dock_control.move_child(control_to_move, idx)
-
-func _show_in_tab_container():
-	var dock_control = get_current_dock_control()
-	if dock_control is not TabContainer:
-		return
-	var control_to_show = plugin_control
-	if _engine_minor_version >= 6:
-		control_to_show = editor_dock
-	control_to_show.show()
-	return
-	var i = dock_control.get_tab_idx_from_control(control_to_show)
-	dock_control.current_tab = i
 
 func get_docked_name():
 	if _docked_name != "":
@@ -652,30 +460,6 @@ static func get_scene_or_script(control):
 static func _plugin_has_main_screen(_plugin:EditorPlugin):
 	return _plugin.has_method("_has_main_screen")
 
-class PanelWrapper extends PanelContainer:
-	var _empty_pan := false
-	func _init(control, _empty_panel:= false) -> void:
-		add_child(control)
-		_empty_pan = _empty_panel
-		size_flags_vertical = Control.SIZE_EXPAND_FILL
-		
-	func _ready() -> void:
-		var panel_sb
-		if _empty_pan:
-			panel_sb = StyleBoxEmpty.new()
-		else:
-			var _version = UVersion.get_minor_version()
-			if _version < 6:
-				panel_sb = get_theme_stylebox("panel").duplicate()
-			else: #elif _version <= 7:
-				panel_sb = EditorInterface.get_editor_theme().get_stylebox("panel", "Panel").duplicate()
-				panel_sb.bg_color = EditorColors.get_theme_color(EditorColors.ThemeColor.BASE)
-			
-			panel_sb.content_margin_left = 4 * EditorInterface.get_editor_scale()
-			panel_sb.content_margin_right = 4 * EditorInterface.get_editor_scale()
-		
-		add_theme_stylebox_override("panel", panel_sb)
-
 class InstanceManager:
 	var instances:Array[DockManager] = []
 	var _msh#:MainScreenHandlerMulti
@@ -685,7 +469,7 @@ class InstanceManager:
 	func _init(_plug:EditorPlugin, _load_freeable_docks:=true, single_instance:=false) -> void:
 		_plugin = _plug
 		_single_instance = single_instance
-		if DockManager._plugin_has_main_screen(_plugin):
+		if DockManager._plugin_has_main_screen(_plugin) and not DockManager.uses_engine_docks():
 			_msh = MainScreenHandlerMulti.new(_plugin)
 			DockManager.hide_main_screen_button(_plugin)
 		
@@ -704,7 +488,9 @@ class InstanceManager:
 			var type = data.get(Keys.TYPE, "nil")
 			if type != Keys.FREEABLE:
 				continue
-			var current_dock = data.get(Keys.CURRENT_DOCK)
+			var saved_slot = DockManager._read_saved_slot(data)
+			if saved_slot == null:
+				saved_slot = DOCK_SLOT_BOTTOM
 			
 			var path = data.get(Keys.SCENE_UID, "")
 			if not FileAccess.file_exists(path):
@@ -718,7 +504,7 @@ class InstanceManager:
 			var scn = load(path)
 			if scn is GDScript:
 				scn = scn.new()
-			var ins = DockManager.new(_plugin, scn, current_dock, _msh, false)
+			var ins = DockManager.new(_plugin, scn, saved_slot, _msh, false)
 			ins.can_be_freed = true
 			var allow_reload = data.get(Keys.ALLOW_RELOAD, false)
 			if allow_reload:
@@ -728,12 +514,12 @@ class InstanceManager:
 			instances.append(ins)
 			current_ids.append(id_int)
 	
-	func new_persistent_dock_manager(scene, slot:Slot, _add_to_tree:=true):
+	func new_persistent_dock_manager(scene, slot:int, _add_to_tree:=true):
 		return _new_dock_manager(scene, slot, false, _add_to_tree)
-	func new_freeable_dock_manager(scene, slot:Slot, _add_to_tree:=true):
+	func new_freeable_dock_manager(scene, slot:int, _add_to_tree:=true):
 		return _new_dock_manager(scene, slot, true, _add_to_tree)
 	
-	func _new_dock_manager(scene, slot:Slot, _can_be_freed:=false, _add_to_tree:=true):
+	func _new_dock_manager(scene, slot:int, _can_be_freed:=false, _add_to_tree:=true):
 		var scene_path:String = DockManager.get_scene_or_script(scene)
 		
 		if _single_instance:
@@ -818,9 +604,6 @@ class InstanceManager:
 
 
 
-class EditorSet:
-	const DOCK_TAB_STYLE = &"interface/editor/dock_tab_style"
-
 class Keys:
 	const DOCKS = "docks"
 	const TYPE = "type"
@@ -829,7 +612,8 @@ class Keys:
 	const ALLOW_RELOAD = "allow_reload"
 	const SCENE_PATH = "scene_path"
 	const SCENE_UID = "scene_uid"
-	const CURRENT_DOCK = "current_dock"
+	const SLOT = "slot"
+	const CURRENT_DOCK = "current_dock" # pre 0.7, offset old codes
 	const CURRENT_DOCK_INDEX = "current_dock_index"
 	const DOCK_DATA = "dock_data"
 	const ALWAYS_ON_TOP = &"ALWAYS_ON_TOP"
