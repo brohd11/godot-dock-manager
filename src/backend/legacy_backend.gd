@@ -296,7 +296,9 @@ func _apply_window_settings():
 	window.title = dm.window_title if dm.window_title != "" else dm.get_docked_name()
 
 func _window_close_requested() -> void:
-	dm.dock_instance(DockManager.legacy_to_slot(last_dock))
+	# Null when it started floating; NONE makes dock_instance use the default, then the bottom panel.
+	var slot = DockManager.DOCK_SLOT_NONE if last_dock == null else DockManager.legacy_to_slot(last_dock)
+	dm.dock_instance(slot)
 
 func _get_current_code():
 	if dm.plugin_control.get_parent() is PanelWrapper:
